@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Student, Exam } from '../types';
 import { QURAN_CHAPTERS } from '../constants';
-import { Award, Play, ChevronLeft, ChevronRight, Maximize2, Minimize2, Sun, ZoomIn, ZoomOut, Save, Trash2, Search, Filter, PauseCircle, RefreshCw, Undo2, Lock, CheckCircle } from 'lucide-react';
+import { Award, Play, ChevronLeft, ChevronRight, Maximize2, Minimize2, Sun, ZoomIn, ZoomOut, Save, Trash2, Search, Filter, PauseCircle, RefreshCw, Undo2, Lock, CheckCircle, Book } from 'lucide-react';
 
 interface ExamViewProps {
   user: User;
@@ -13,18 +13,27 @@ interface ExamViewProps {
 }
 
 type ViewMode = 'list' | 'setup' | 'live';
-type ExamMode = 'halaman' | 'surat';
+
+// Mapping Juz to Pages (Madani Mushaf Standard)
+const JUZ_PAGES: Record<number, { start: number, end: number }> = {
+  1: { start: 2, end: 21 }, 2: { start: 22, end: 41 }, 3: { start: 42, end: 61 },
+  4: { start: 62, end: 81 }, 5: { start: 82, end: 101 }, 6: { start: 102, end: 121 },
+  7: { start: 122, end: 141 }, 8: { start: 142, end: 161 }, 9: { start: 162, end: 181 },
+  10: { start: 182, end: 201 }, 11: { start: 202, end: 221 }, 12: { start: 222, end: 241 },
+  13: { start: 242, end: 261 }, 14: { start: 262, end: 281 }, 15: { start: 282, end: 301 },
+  16: { start: 302, end: 321 }, 17: { start: 322, end: 341 }, 18: { start: 342, end: 361 },
+  19: { start: 362, end: 381 }, 20: { start: 382, end: 401 }, 21: { start: 402, end: 421 },
+  22: { start: 422, end: 441 }, 23: { start: 442, end: 461 }, 24: { start: 462, end: 481 },
+  25: { start: 482, end: 501 }, 26: { start: 502, end: 521 }, 27: { start: 522, end: 541 },
+  28: { start: 542, end: 561 }, 29: { start: 562, end: 581 }, 30: { start: 582, end: 604 }
+};
 
 const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, onDeleteExam }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [examMode, setExamMode] = useState<ExamMode>('halaman');
-  const [startPage, setStartPage] = useState<number>(1);
-  const [endPage, setEndPage] = useState<number>(604);
-  const [selectedSurah, setSelectedSurah] = useState<string>('1');
+  const [selectedJuz, setSelectedJuz] = useState<number>(30);
 
-  // Filter and Search for history
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyFilterClass, setHistoryFilterClass] = useState('');
 
@@ -52,8 +61,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
             setScore(data.score);
             setMistakes(data.mistakes);
             setMistakeHistory(data.mistakeHistory || []);
-            setExamMode(data.examMode);
-            setIsFullScreen(data.isFullScreen);
+            setIsFullScreen(data.isFullScreen || false);
             setImageBrightness(data.imageBrightness || 100);
             setZoomLevel(data.zoomLevel || 1);
             setViewMode('live');
@@ -65,10 +73,10 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
   useEffect(() => {
     if (viewMode === 'live' && currentSession) {
       localStorage.setItem('sita_live_exam_session_v1', JSON.stringify({
-        viewMode, currentSession, currentPage, score, mistakes, mistakeHistory, examMode, isFullScreen, imageBrightness, zoomLevel
+        viewMode, currentSession, currentPage, score, mistakes, mistakeHistory, isFullScreen, imageBrightness, zoomLevel
       }));
     } else if (viewMode === 'list') localStorage.removeItem('sita_live_exam_session_v1');
-  }, [viewMode, currentSession, currentPage, score, mistakes, mistakeHistory, examMode, isFullScreen, imageBrightness, zoomLevel]);
+  }, [viewMode, currentSession, currentPage, score, mistakes, mistakeHistory, isFullScreen, imageBrightness, zoomLevel]);
 
   const calculateScore = (currentMistakes: { dibantu: number, ditegur: number, berhenti: number }) => {
     const penalty = (currentMistakes.dibantu * 2) + (currentMistakes.ditegur * 1) + (currentMistakes.berhenti * 0.5);
@@ -78,28 +86,22 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
   const handleStartExam = () => {
     if (!selectedStudentId) return alert("Pilih santri");
     const student = students.find(s => s.id === selectedStudentId);
-    let start = startPage;
-    let end = endPage;
-    let label = '';
-    
-    if (examMode === 'halaman') {
-      label = `Hal ${start} - ${end}`;
-    } else {
-      const surahIdx = parseInt(selectedSurah);
-      const surahData = QURAN_CHAPTERS.find(s => s[0] === surahIdx);
-      if (surahData) { 
-        start = surahData[2]; 
-        end = Math.min(604, start + 2); 
-        label = `QS. ${surahData[1]}`; 
-      }
-    }
+    if (!student) return;
+
+    const juzInfo = JUZ_PAGES[selectedJuz];
+    const label = `Juz ${selectedJuz}`;
 
     setCurrentSession({ 
       id: Math.random().toString(36).substr(2, 9),
-      student, mode: examMode, start, end, label, examiners: [user.name],
-      startBlockPage: start 
+      student, 
+      juz: selectedJuz,
+      start: juzInfo.start, 
+      end: juzInfo.end, 
+      label: label, 
+      examiners: [user.name],
+      startBlockPage: juzInfo.start 
     });
-    setCurrentPage(start);
+    setCurrentPage(juzInfo.start);
     setScore(100);
     setMistakes({ dibantu: 0, ditegur: 0, berhenti: 0 });
     setMistakeHistory([]);
@@ -124,7 +126,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
     setCurrentSession({
         id: exam.id,
         student,
-        mode: 'halaman',
+        juz: parseInt(exam.juz?.replace('Juz ', '') || '30'),
         start: start,
         end: end,
         label: exam.category,
@@ -163,7 +165,6 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
         setImgLoading(true);
         setCurrentPage(c => c - 1);
     } else if (direction === 'next') {
-        // Cek apakah sudah mencapai 10 halaman dari startBlockPage
         const progressInBlock = currentPage - currentSession.startBlockPage + 1;
         if (progressInBlock >= 10 && currentPage < currentSession.end) {
             setShowBlockLock(true);
@@ -179,7 +180,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
   const handleSaveProgress = async (status: 'remedial' | 'pass' | 'fail' = 'remedial') => {
     setIsSaving(true);
     const finalScore = parseFloat(score.toFixed(1));
-    const juzString = `Juz ${Math.ceil(currentPage / 20)}`;
+    const juzString = `Juz ${currentSession.juz}`;
     
     const examData: Exam = {
       id: currentSession.id,
@@ -194,7 +195,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
       class: currentSession.student.class,
       details: { 
           juz: juzString, 
-          surat: examMode === 'surat' ? currentSession.label : `Hal ${currentPage}`, 
+          surat: `Halaman ${currentPage}`, 
           halaman: `${currentPage}-${currentSession.end}`, 
           mistakes 
       }
@@ -204,22 +205,17 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
     
     setTimeout(() => {
         setIsSaving(false);
+        localStorage.removeItem('sita_live_exam_session_v1');
         if (status !== 'remedial') {
-            localStorage.removeItem('sita_live_exam_session_v1');
             setCurrentSession(null);
-            setViewMode('list');
-            alert("Ujian Selesai. Nilai akhir disimpan.");
-        } else {
-            // Jika hanya simpan sementara
-            localStorage.removeItem('sita_live_exam_session_v1');
-            setViewMode('list');
-            alert("Progres 10 halaman berhasil dikunci dan disimpan.");
         }
+        setShowBlockLock(false);
+        setViewMode('list');
+        alert(status === 'remedial' ? "Progres 10 halaman berhasil dikunci." : "Ujian Selesai. Nilai akhir disimpan.");
     }, 1000);
   };
 
   const handleContinueAfterLock = () => {
-    // Update startBlockPage ke halaman saat ini untuk 10 halaman berikutnya
     setCurrentSession({ ...currentSession, startBlockPage: currentPage + 1 });
     setShowBlockLock(false);
     setImgLoading(true);
@@ -272,20 +268,19 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
 
     return (
       <div className="relative h-[calc(100vh-160px)]">
-        {/* MODAL KUNCI NILAI BLOK */}
         {showBlockLock && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
                 <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
                     <div className="bg-amber-500 p-6 text-white text-center">
                         <Lock size={48} className="mx-auto mb-3 opacity-90" />
-                        <h3 className="text-xl font-bold leading-tight">Kunci Nilai Blok</h3>
-                        <p className="text-sm opacity-90 mt-1">Santri telah menyelesaikan 10 halaman</p>
+                        <h3 className="text-xl font-bold leading-tight">Kunci Nilai 10 Halaman</h3>
+                        <p className="text-sm opacity-90 mt-1">Selesaikan blok atau simpan progres</p>
                     </div>
                     <div className="p-6 space-y-3">
                         <div className="bg-gray-50 p-3 rounded-lg border mb-4">
-                            <div className="flex justify-between text-xs text-gray-500 font-bold uppercase mb-1"><span>Progres Saat Ini</span><span>Skor</span></div>
+                            <div className="flex justify-between text-xs text-gray-500 font-bold uppercase mb-1"><span>Target Blok</span><span>Skor</span></div>
                             <div className="flex justify-between items-end">
-                                <span className="text-gray-800 font-bold">Halaman {currentSession.startBlockPage} - {currentPage}</span>
+                                <span className="text-gray-800 font-bold">Hal {currentSession.startBlockPage} - {currentPage}</span>
                                 <span className="text-2xl font-black text-primary">{score.toFixed(1)}</span>
                             </div>
                         </div>
@@ -298,7 +293,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
                         <button onClick={() => handleSaveProgress(score >= 70 ? 'pass' : 'fail')} className="w-full flex items-center justify-center gap-3 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700">
                             <CheckCircle size={18}/> KUNCI & SELESAI UJIAN
                         </button>
-                        <button onClick={() => setShowBlockLock(false)} className="w-full py-2 text-xs text-gray-400 font-medium hover:text-gray-600 uppercase">Kembali (Belum Kunci)</button>
+                        <button onClick={() => setShowBlockLock(false)} className="w-full py-2 text-xs text-gray-400 font-medium hover:text-gray-600 uppercase">Kembali</button>
                     </div>
                 </div>
             </div>
@@ -310,7 +305,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
                  <div className="flex items-center gap-3">
                      <div>
                         <h2 className="font-bold text-gray-800 text-lg leading-none truncate max-w-[150px]">{currentSession.student.name}</h2>
-                        <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold">HALAMAN {currentPage} ({progressInBlock}/10)</p>
+                        <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold">JUZ {currentSession.juz} • HAL {currentPage} ({progressInBlock}/10)</p>
                      </div>
                      <div className="bg-emerald-100 px-3 py-1 rounded-lg border border-emerald-200">
                         <div className="text-[10px] text-emerald-800 font-bold leading-none">NILAI</div>
@@ -347,12 +342,12 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
                    {imgLoading && <div className="absolute inset-0 flex items-center justify-center bg-amber-50 z-10"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div></div>}
                    <img src={imageUrl} alt={`Page ${currentPage}`} className="shadow-lg rounded max-w-full h-auto" onLoad={() => setImgLoading(false)} style={{ display: imgLoading ? 'none' : 'block' }} />
                 </div>
-                <div className="bg-white p-3 border-t text-center text-sm font-bold text-gray-500">Halaman {currentPage} (Blok: {progressInBlock}/10)</div>
+                <div className="bg-white p-3 border-t text-center text-sm font-bold text-gray-500">Hal {currentPage} (Blok: {progressInBlock}/10)</div>
               </div>
               <div className="w-full lg:w-96 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col shrink-0">
                 <div className="p-4 border-b bg-gray-50 rounded-t-xl flex justify-between items-center"><div><h2 className="font-bold text-gray-800 leading-tight">{currentSession.student.name}</h2><p className="text-xs text-gray-500 mt-1">{currentSession.label}</p></div><div className="text-right"><div className="text-[10px] text-gray-400 font-bold">NILAI</div><div className="text-3xl font-black text-primary">{score.toFixed(1)}</div></div></div>
                 <div className="p-4 space-y-4">
-                   <div className="text-xs text-gray-400 mb-1">Penguji Aktif: {currentSession.examiners.join(', ')}</div>
+                   <div className="text-xs text-gray-400 mb-1">Penguji: {currentSession.examiners.join(', ')}</div>
                    <ScoringButtons />
                 </div>
                 <div className="flex-1"></div>
@@ -366,23 +361,46 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
 
   const renderSetup = () => (
     <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6 animate-fade-in">
-      <div className="flex justify-between items-center mb-6 border-b pb-4"><h3 className="text-xl font-bold text-gray-800">Mulai Ujian Baru</h3><button onClick={() => setViewMode('list')} className="text-gray-500">Batal</button></div>
-      <div className="space-y-4">
+      <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Award className="text-primary"/> Mulai Ujian Juz</h3>
+        <button onClick={() => setViewMode('list')} className="text-gray-500">Batal</button>
+      </div>
+      <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
-          <div><label className="block text-sm font-medium mb-1">Kelas</label><select className="w-full border rounded-lg p-2.5 bg-gray-50" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}><option value="">Pilih...</option>{Array.from(new Set(students.map(s => s.class))).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-          <div><label className="block text-sm font-medium mb-1">Santri</label><select className="w-full border rounded-lg p-2.5 bg-gray-50" value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}><option value="">Pilih...</option>{students.filter(s => !selectedClass || s.class === selectedClass).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+          <div><label className="block text-sm font-bold text-gray-600 mb-1">Pilih Kelas</label><select className="w-full border rounded-xl p-3 bg-gray-50 focus:ring-2 focus:ring-primary outline-none" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}><option value="">Pilih...</option>{Array.from(new Set(students.map(s => s.class))).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+          <div><label className="block text-sm font-bold text-gray-600 mb-1">Nama Santri</label><select className="w-full border rounded-xl p-3 bg-gray-50 focus:ring-2 focus:ring-primary outline-none" value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}><option value="">Pilih...</option>{students.filter(s => !selectedClass || s.class === selectedClass).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         </div>
-        <div className="bg-gray-100 p-1 rounded-lg flex"><button className={`flex-1 py-2 rounded-md text-sm font-medium ${examMode === 'halaman' ? 'bg-white shadow text-primary' : 'text-gray-500'}`} onClick={() => setExamMode('halaman')}>Halaman Bebas</button><button className={`flex-1 py-2 rounded-md text-sm font-medium ${examMode === 'surat' ? 'bg-white shadow text-primary' : 'text-gray-500'}`} onClick={() => setExamMode('surat')}>Surat</button></div>
-        {examMode === 'halaman' ? (
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-sm font-medium">Halaman Awal</label><input type="number" min="1" max="604" className="w-full border rounded-lg p-2.5" value={startPage} onChange={(e) => setStartPage(parseInt(e.target.value) || 1)} /></div>
-            <div><label className="text-sm font-medium">Halaman Akhir</label><input type="number" min={startPage} max="604" className="w-full border rounded-lg p-2.5" value={endPage} onChange={(e) => setEndPage(parseInt(e.target.value) || 604)} /></div>
-          </div>
-        ) : (
-          <div><label className="text-sm font-medium">Pilih Surat</label><select className="w-full border rounded-lg p-2.5 bg-gray-50" value={selectedSurah} onChange={(e) => setSelectedSurah(e.target.value)}>{QURAN_CHAPTERS.map(q => <option key={q[0]} value={q[0]}>{q[0]}. {q[1]}</option>)}</select></div>
-        )}
-        <div className="bg-blue-50 p-4 rounded-lg text-xs text-blue-700 flex items-start gap-2 border border-blue-100"><Play size={16} className="shrink-0 mt-0.5" /> <span>Fitur <b>Kunci Nilai</b> akan muncul setiap santri menyelesaikan 10 halaman hafalan.</span></div>
-        <button onClick={handleStartExam} className="w-full py-3 bg-primary text-white rounded-lg font-bold flex items-center justify-center gap-2 mt-4">MULAI UJIAN <Award size={20} /></button>
+
+        <div>
+            <label className="block text-sm font-bold text-gray-600 mb-2">Pilih Materi Juz</label>
+            <div className="grid grid-cols-5 gap-2">
+                {Array.from({length: 30}, (_, i) => i + 1).map(j => (
+                    <button 
+                        key={j} 
+                        onClick={() => setSelectedJuz(j)}
+                        className={`p-3 rounded-xl border font-bold transition-all ${selectedJuz === j ? 'bg-primary text-white border-primary shadow-md' : 'bg-white text-gray-600 hover:border-primary'}`}
+                    >
+                        {j}
+                    </button>
+                ))}
+            </div>
+        </div>
+
+        <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+            <div className="flex items-center gap-3 mb-2">
+                <Book className="text-primary" size={20} />
+                <h4 className="font-bold text-emerald-800">Detail Ujian: Juz {selectedJuz}</h4>
+            </div>
+            <div className="flex justify-between text-sm text-emerald-700">
+                <span>Rentang Halaman:</span>
+                <span className="font-mono font-bold">{JUZ_PAGES[selectedJuz].start} - {JUZ_PAGES[selectedJuz].end}</span>
+            </div>
+            <p className="text-[11px] text-emerald-600 mt-2 italic">*Kunci nilai otomatis akan muncul setiap 10 halaman hafalan.</p>
+        </div>
+
+        <button onClick={handleStartExam} className="w-full py-4 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-800 transition-all active:scale-95">
+            MULAI UJIAN SEKARANG <Award size={22} />
+        </button>
       </div>
     </div>
   );
@@ -438,7 +456,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
         {filteredExams.length === 0 ? <div className="col-span-full text-center py-12 text-gray-400">Belum ada data.</div> : filteredExams.map(exam => {
             const s = students.find(st => st.id === exam.studentId);
             return (
-              <div key={exam.id} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md">
+              <div key={exam.id} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                 <div className={`h-1.5 w-full ${exam.score >= 70 ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 <div className="p-5">
                   <div className="flex justify-between items-start mb-2"><div><h3 className="font-bold text-gray-800 text-lg">{s?.name || 'Santri'}</h3><p className="text-sm font-medium text-primary mt-0.5">{s?.class || '-'} | {exam.category}</p></div><div className={`text-right font-black text-2xl ${exam.score >= 70 ? 'text-green-600' : 'text-red-600'}`}>{exam.score}</div></div>
