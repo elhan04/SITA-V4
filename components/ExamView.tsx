@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Student, Exam } from '../types';
 import { QURAN_CHAPTERS } from '../constants';
-import { Award, Play, ChevronLeft, ChevronRight, Maximize2, Minimize2, Sun, ZoomIn, ZoomOut, Save, Trash2, Search, Filter, PauseCircle, RefreshCw, Undo2 } from 'lucide-react';
+import { Award, Play, ChevronLeft, ChevronRight, Maximize2, Minimize2, Sun, ZoomIn, ZoomOut, Save, Trash2, Search, Filter, PauseCircle, RefreshCw, Undo2, Lock, CheckCircle } from 'lucide-react';
 
 interface ExamViewProps {
   user: User;
@@ -21,7 +21,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [examMode, setExamMode] = useState<ExamMode>('halaman');
   const [startPage, setStartPage] = useState<number>(1);
-  const [packetSize, setPacketSize] = useState<number>(10);
+  const [endPage, setEndPage] = useState<number>(604);
   const [selectedSurah, setSelectedSurah] = useState<string>('1');
 
   // Filter and Search for history
@@ -38,6 +38,7 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
   const [imageBrightness, setImageBrightness] = useState(100);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
+  const [showBlockLock, setShowBlockLock] = useState(false);
 
   useEffect(() => {
     const savedSession = localStorage.getItem('sita_live_exam_session_v1');
@@ -77,19 +78,26 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
   const handleStartExam = () => {
     if (!selectedStudentId) return alert("Pilih santri");
     const student = students.find(s => s.id === selectedStudentId);
-    let start = 0, end = 0, label = '';
+    let start = startPage;
+    let end = endPage;
+    let label = '';
+    
     if (examMode === 'halaman') {
-      start = startPage;
-      end = Math.min(604, startPage + packetSize - 1);
       label = `Hal ${start} - ${end}`;
     } else {
       const surahIdx = parseInt(selectedSurah);
       const surahData = QURAN_CHAPTERS.find(s => s[0] === surahIdx);
-      if (surahData) { start = surahData[2]; end = Math.min(604, start + 2); label = `QS. ${surahData[1]}`; }
+      if (surahData) { 
+        start = surahData[2]; 
+        end = Math.min(604, start + 2); 
+        label = `QS. ${surahData[1]}`; 
+      }
     }
+
     setCurrentSession({ 
       id: Math.random().toString(36).substr(2, 9),
-      student, mode: examMode, start, end, label, examiners: [user.name] 
+      student, mode: examMode, start, end, label, examiners: [user.name],
+      startBlockPage: start 
     });
     setCurrentPage(start);
     setScore(100);
@@ -109,20 +117,25 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
         currentExaminers.push(user.name);
     }
 
+    const pages = exam.details?.halaman?.split('-') || ['1', '604'];
+    const start = parseInt(pages[0]);
+    const end = parseInt(pages[1]);
+
     setCurrentSession({
         id: exam.id,
         student,
         mode: 'halaman',
-        start: parseInt(exam.details?.halaman?.split('-')[0] || '1'),
-        end: parseInt(exam.details?.halaman?.split('-')[1] || '604'),
+        start: start,
+        end: end,
         label: exam.category,
-        examiners: currentExaminers
+        examiners: currentExaminers,
+        startBlockPage: start 
     });
     
-    setCurrentPage(parseInt(exam.details?.halaman?.split('-')[0] || '1'));
+    setCurrentPage(start);
     setScore(exam.score);
     setMistakes(exam.details?.mistakes || { dibantu: 0, ditegur: 0, berhenti: 0 });
-    setMistakeHistory([]); // History di-reset saat resume untuk keamanan data
+    setMistakeHistory([]);
     setViewMode('live');
   };
 
@@ -135,10 +148,8 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
 
   const handleUndoMistake = () => {
     if (mistakeHistory.length === 0) return;
-    
     const newHistory = [...mistakeHistory];
     const lastMistake = newHistory.pop();
-    
     if (lastMistake) {
         const newMistakes = { ...mistakes, [lastMistake]: Math.max(0, mistakes[lastMistake] - 1) };
         setMistakes(newMistakes);
@@ -147,7 +158,25 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
     }
   };
 
-  const handleSaveProgress = async () => {
+  const handlePageNavigation = (direction: 'next' | 'prev') => {
+    if (direction === 'prev' && currentPage > currentSession.start) {
+        setImgLoading(true);
+        setCurrentPage(c => c - 1);
+    } else if (direction === 'next') {
+        // Cek apakah sudah mencapai 10 halaman dari startBlockPage
+        const progressInBlock = currentPage - currentSession.startBlockPage + 1;
+        if (progressInBlock >= 10 && currentPage < currentSession.end) {
+            setShowBlockLock(true);
+        } else if (currentPage < currentSession.end) {
+            setImgLoading(true);
+            setCurrentPage(c => c + 1);
+        } else {
+            handleFinishExam();
+        }
+    }
+  };
+
+  const handleSaveProgress = async (status: 'remedial' | 'pass' | 'fail' = 'remedial') => {
     setIsSaving(true);
     const finalScore = parseFloat(score.toFixed(1));
     const juzString = `Juz ${Math.ceil(currentPage / 20)}`;
@@ -159,8 +188,8 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
       category: currentSession.label,
       score: finalScore,
       examiner: currentSession.examiners.join(', '),
-      status: 'remedial',
-      notes: currentSession.examiners.join(', '),
+      status: status,
+      notes: status === 'remedial' ? currentSession.examiners.join(', ') : `${status.toUpperCase()} (Penguji: ${currentSession.examiners.join(', ')})`,
       juz: juzString,
       class: currentSession.student.class,
       details: { 
@@ -172,41 +201,40 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
     };
 
     onAddExam(examData);
+    
     setTimeout(() => {
         setIsSaving(false);
-        localStorage.removeItem('sita_live_exam_session_v1');
-        setViewMode('list');
-        alert("Progres berhasil disimpan.");
+        if (status !== 'remedial') {
+            localStorage.removeItem('sita_live_exam_session_v1');
+            setCurrentSession(null);
+            setViewMode('list');
+            alert("Ujian Selesai. Nilai akhir disimpan.");
+        } else {
+            // Jika hanya simpan sementara
+            localStorage.removeItem('sita_live_exam_session_v1');
+            setViewMode('list');
+            alert("Progres 10 halaman berhasil dikunci dan disimpan.");
+        }
     }, 1000);
+  };
+
+  const handleContinueAfterLock = () => {
+    // Update startBlockPage ke halaman saat ini untuk 10 halaman berikutnya
+    setCurrentSession({ ...currentSession, startBlockPage: currentPage + 1 });
+    setShowBlockLock(false);
+    setImgLoading(true);
+    setCurrentPage(c => c + 1);
   };
 
   const handleFinishExam = () => {
     if (!confirm("Selesaikan ujian dan simpan nilai akhir?")) return;
-    const finalScore = parseFloat(score.toFixed(1));
-    const status = finalScore >= 70 ? 'pass' : 'fail';
-    const juzString = `Juz ${Math.ceil(currentSession.start / 20)}`;
-    
-    onAddExam({
-      id: currentSession.id,
-      studentId: currentSession.student.id,
-      date: new Date().toISOString().split('T')[0],
-      category: `${currentSession.label}`,
-      score: finalScore,
-      examiner: currentSession.examiners.join(', '),
-      status: status,
-      notes: status.toUpperCase() + " (Penguji: " + currentSession.examiners.join(', ') + ")",
-      juz: juzString,
-      class: currentSession.student.class,
-      details: { juz: juzString, surat: examMode === 'surat' ? currentSession.label : `Hal ${currentSession.start}`, halaman: `${currentSession.start}-${currentSession.end}`, mistakes }
-    });
-    localStorage.removeItem('sita_live_exam_session_v1');
-    setCurrentSession(null);
-    setViewMode('list');
+    handleSaveProgress(score >= 70 ? 'pass' : 'fail');
   };
 
   const renderLiveExam = () => {
     const imageUrl = `https://android.quran.com/data/width_1024/page${currentPage.toString().padStart(3, '0')}.png`;
-    
+    const progressInBlock = currentPage - currentSession.startBlockPage + 1;
+
     const ScoringButtons = () => (
          <div className="flex flex-col gap-3 w-full md:flex-1">
             <div className="grid grid-cols-3 gap-3">
@@ -224,11 +252,8 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
                 </button>
             </div>
             {mistakeHistory.length > 0 && (
-                <button 
-                    onClick={handleUndoMistake}
-                    className="flex items-center justify-center gap-2 py-1.5 px-4 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors animate-fade-in"
-                >
-                    <Undo2 size={14} /> URUNGKAN PENILAIAN TERAKHIR
+                <button onClick={handleUndoMistake} className="flex items-center justify-center gap-2 py-1.5 px-4 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors">
+                    <Undo2 size={14} /> URUNGKAN PENILAIAN
                 </button>
             )}
         </div>
@@ -237,85 +262,104 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
     const NavigationButtons = () => (
       <div className="flex flex-col gap-2 w-full">
         <div className="flex gap-2 w-full">
-            <button onClick={() => { if (currentPage > currentSession.start) { setImgLoading(true); setCurrentPage(c => c - 1); }}} disabled={currentPage <= currentSession.start} className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-600 rounded-lg disabled:opacity-50"><ChevronLeft size={20} /> <span className="hidden md:inline">Sebelumnya</span></button>
-            {currentPage < currentSession.end ? (
-              <button onClick={() => { setImgLoading(true); setCurrentPage(c => c + 1); }} className="flex-[2] flex items-center justify-center gap-2 py-3 bg-primary text-white rounded-lg shadow-sm hover:bg-emerald-700">Lanjut <ChevronRight size={20} /></button>
-            ) : (
-              <button onClick={handleFinishExam} className="flex-[2] flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-lg font-bold shadow-lg hover:bg-green-700"><Save size={20} /> SELESAI</button>
-            )}
+            <button onClick={() => handlePageNavigation('prev')} disabled={currentPage <= currentSession.start} className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-600 rounded-lg disabled:opacity-50"><ChevronLeft size={20} /> <span className="hidden md:inline">Sebelumnya</span></button>
+            <button onClick={() => handlePageNavigation('next')} className="flex-[2] flex items-center justify-center gap-2 py-3 bg-primary text-white rounded-lg shadow-sm hover:bg-emerald-700 font-bold italic">
+                {currentPage >= currentSession.end ? 'SELESAI' : `LANJUT (${progressInBlock}/10)`} <ChevronRight size={20} />
+            </button>
         </div>
-        <button 
-            onClick={handleSaveProgress} 
-            disabled={isSaving}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500 text-white rounded-lg font-bold shadow-sm hover:bg-amber-600 transition-colors text-sm"
-        >
-            {isSaving ? <RefreshCw className="animate-spin" size={16}/> : <PauseCircle size={16} />}
-            SIMPAN SEMENTARA
-        </button>
       </div>
     );
 
-    if (isFullScreen) {
-      return (
-        <div className="fixed inset-0 z-50 bg-white flex flex-col h-[100dvh] animate-fade-in">
-          <div className="bg-white/95 backdrop-blur shadow-sm border-b px-4 py-2 flex justify-between items-center z-20 shrink-0">
-             <div className="flex items-center gap-3">
-                 <div>
-                    <h2 className="font-bold text-gray-800 text-lg leading-none truncate max-w-[150px]">{currentSession.student.name}</h2>
-                    <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold">HALAMAN {currentPage}</p>
-                 </div>
-                 <div className="bg-emerald-100 px-3 py-1 rounded-lg border border-emerald-200">
-                    <div className="text-[10px] text-emerald-800 font-bold leading-none">NILAI</div>
-                    <div className="text-xl font-black text-emerald-700 leading-none">{score.toFixed(1)}</div>
-                 </div>
-             </div>
-             
-             <div className="flex items-center gap-2">
-                 <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 mr-2">
-                    <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="p-1 hover:bg-white rounded"><ZoomOut size={16} /></button>
-                    <span className="text-xs font-mono w-8 text-center">{Math.round(zoomLevel * 100)}%</span>
-                    <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="p-1 hover:bg-white rounded"><ZoomIn size={16} /></button>
-                 </div>
-
-                 <div className="hidden md:flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full"><Sun size={14} className="text-gray-400" /><input type="range" min="80" max="150" value={imageBrightness} onChange={(e) => setImageBrightness(parseInt(e.target.value))} className="w-20 h-1.5 bg-gray-300 rounded-lg appearance-none cursor-pointer" /></div>
-                 <button onClick={() => setIsFullScreen(false)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-200"><Minimize2 size={16} /></button>
-             </div>
-          </div>
-          <div className="flex-1 relative overflow-auto bg-gray-50 flex items-start justify-center p-4">
-             {imgLoading && <div className="absolute inset-0 flex items-center justify-center z-10 bg-white/80"><div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>}
-             <div style={{ width: `${zoomLevel * 100}%`, maxWidth: 'none', transition: 'width 0.2s ease-out' }} className="flex justify-center min-h-full">
-                <img src={imageUrl} alt={`Page ${currentPage}`} className="w-full h-auto shadow-lg bg-white" onLoad={() => { setImgLoading(false); }} onError={() => { setImgLoading(false); }} style={{ filter: `brightness(${imageBrightness}%) contrast(1.1)` }} />
-             </div>
-          </div>
-          <div className="bg-white border-t p-3 md:p-4 pb-8 md:pb-6 z-20 shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] relative">
-             <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-start gap-4">
-                <ScoringButtons />
-                <div className="w-full md:w-80"><NavigationButtons /></div>
-             </div>
-          </div>
-        </div>
-      );
-    }
-
     return (
-      <div className="flex flex-col lg:flex-row h-[calc(100vh-160px)] gap-4 animate-fade-in">
-        <div className="relative bg-amber-50 rounded-xl overflow-hidden shadow-inner border border-amber-100 flex-1 flex flex-col group">
-          <button onClick={() => setIsFullScreen(true)} className="absolute top-4 right-4 z-20 bg-white/90 backdrop-blur p-2 rounded-full shadow-md text-gray-700 hover:text-primary transition-colors"><Maximize2 size={20} /></button>
-          <div className="flex-1 overflow-y-auto flex items-start justify-center p-4">
-             {imgLoading && <div className="absolute inset-0 flex items-center justify-center bg-amber-50 z-10"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div></div>}
-             <img src={imageUrl} alt={`Page ${currentPage}`} className="shadow-lg rounded max-w-full h-auto" onLoad={() => { setImgLoading(false); }} style={{ display: imgLoading ? 'none' : 'block' }} />
-          </div>
-          <div className="bg-white p-3 border-t text-center text-sm font-bold text-gray-500">Halaman {currentPage}</div>
-        </div>
-        <div className="w-full lg:w-96 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col shrink-0">
-          <div className="p-4 border-b bg-gray-50 rounded-t-xl flex justify-between items-center"><div><h2 className="font-bold text-gray-800 leading-tight">{currentSession.student.name}</h2><p className="text-xs text-gray-500 mt-1">{currentSession.label}</p></div><div className="text-right"><div className="text-[10px] text-gray-400 font-bold">NILAI</div><div className="text-3xl font-black text-primary">{score.toFixed(1)}</div></div></div>
-          <div className="p-4 space-y-4">
-             <div className="text-xs text-gray-400 mb-1">Penguji Aktif: {currentSession.examiners.join(', ')}</div>
-             <ScoringButtons />
-          </div>
-          <div className="flex-1"></div>
-          <div className="p-4 border-t space-y-3"><NavigationButtons /><button onClick={() => { if(confirm("Batal?")) setViewMode('list'); }} className="w-full text-xs text-red-500 hover:text-red-700">Batalkan Ujian</button></div>
-        </div>
+      <div className="relative h-[calc(100vh-160px)]">
+        {/* MODAL KUNCI NILAI BLOK */}
+        {showBlockLock && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
+                    <div className="bg-amber-500 p-6 text-white text-center">
+                        <Lock size={48} className="mx-auto mb-3 opacity-90" />
+                        <h3 className="text-xl font-bold leading-tight">Kunci Nilai Blok</h3>
+                        <p className="text-sm opacity-90 mt-1">Santri telah menyelesaikan 10 halaman</p>
+                    </div>
+                    <div className="p-6 space-y-3">
+                        <div className="bg-gray-50 p-3 rounded-lg border mb-4">
+                            <div className="flex justify-between text-xs text-gray-500 font-bold uppercase mb-1"><span>Progres Saat Ini</span><span>Skor</span></div>
+                            <div className="flex justify-between items-end">
+                                <span className="text-gray-800 font-bold">Halaman {currentSession.startBlockPage} - {currentPage}</span>
+                                <span className="text-2xl font-black text-primary">{score.toFixed(1)}</span>
+                            </div>
+                        </div>
+                        <button onClick={handleContinueAfterLock} className="w-full flex items-center justify-center gap-3 py-3 bg-primary text-white rounded-xl font-bold hover:bg-emerald-700 shadow-md">
+                            <Play size={18}/> KUNCI & LANJUTKAN
+                        </button>
+                        <button onClick={() => handleSaveProgress('remedial')} className="w-full flex items-center justify-center gap-3 py-3 bg-amber-100 text-amber-700 rounded-xl font-bold hover:bg-amber-200">
+                            <PauseCircle size={18}/> KUNCI & SIMPAN SEMENTARA
+                        </button>
+                        <button onClick={() => handleSaveProgress(score >= 70 ? 'pass' : 'fail')} className="w-full flex items-center justify-center gap-3 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700">
+                            <CheckCircle size={18}/> KUNCI & SELESAI UJIAN
+                        </button>
+                        <button onClick={() => setShowBlockLock(false)} className="w-full py-2 text-xs text-gray-400 font-medium hover:text-gray-600 uppercase">Kembali (Belum Kunci)</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {isFullScreen ? (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col h-[100dvh] animate-fade-in">
+              <div className="bg-white/95 backdrop-blur shadow-sm border-b px-4 py-2 flex justify-between items-center z-20 shrink-0">
+                 <div className="flex items-center gap-3">
+                     <div>
+                        <h2 className="font-bold text-gray-800 text-lg leading-none truncate max-w-[150px]">{currentSession.student.name}</h2>
+                        <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold">HALAMAN {currentPage} ({progressInBlock}/10)</p>
+                     </div>
+                     <div className="bg-emerald-100 px-3 py-1 rounded-lg border border-emerald-200">
+                        <div className="text-[10px] text-emerald-800 font-bold leading-none">NILAI</div>
+                        <div className="text-xl font-black text-emerald-700 leading-none">{score.toFixed(1)}</div>
+                     </div>
+                 </div>
+                 <div className="flex items-center gap-2">
+                     <div className="hidden md:flex items-center gap-1 bg-gray-100 rounded-lg p-1 mr-2">
+                        <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="p-1 hover:bg-white rounded"><ZoomOut size={16} /></button>
+                        <span className="text-xs font-mono w-8 text-center">{Math.round(zoomLevel * 100)}%</span>
+                        <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="p-1 hover:bg-white rounded"><ZoomIn size={16} /></button>
+                     </div>
+                     <button onClick={() => setIsFullScreen(false)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-200"><Minimize2 size={16} /></button>
+                 </div>
+              </div>
+              <div className="flex-1 relative overflow-auto bg-gray-50 flex items-start justify-center p-4">
+                 {imgLoading && <div className="absolute inset-0 flex items-center justify-center z-10 bg-white/80"><div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>}
+                 <div style={{ width: `${zoomLevel * 100}%`, transition: 'width 0.2s ease-out' }} className="flex justify-center min-h-full">
+                    <img src={imageUrl} alt={`Page ${currentPage}`} className="w-full h-auto shadow-lg bg-white" onLoad={() => setImgLoading(false)} style={{ filter: `brightness(${imageBrightness}%) contrast(1.1)` }} />
+                 </div>
+              </div>
+              <div className="bg-white border-t p-3 md:p-4 pb-8 z-20 shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                 <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-start gap-4">
+                    <ScoringButtons />
+                    <div className="w-full md:w-80"><NavigationButtons /></div>
+                 </div>
+              </div>
+            </div>
+        ) : (
+            <div className="flex flex-col lg:flex-row h-full gap-4 animate-fade-in">
+              <div className="relative bg-amber-50 rounded-xl overflow-hidden shadow-inner border border-amber-100 flex-1 flex flex-col group">
+                <button onClick={() => setIsFullScreen(true)} className="absolute top-4 right-4 z-20 bg-white/90 backdrop-blur p-2 rounded-full shadow-md text-gray-700 hover:text-primary"><Maximize2 size={20} /></button>
+                <div className="flex-1 overflow-y-auto flex items-start justify-center p-4">
+                   {imgLoading && <div className="absolute inset-0 flex items-center justify-center bg-amber-50 z-10"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div></div>}
+                   <img src={imageUrl} alt={`Page ${currentPage}`} className="shadow-lg rounded max-w-full h-auto" onLoad={() => setImgLoading(false)} style={{ display: imgLoading ? 'none' : 'block' }} />
+                </div>
+                <div className="bg-white p-3 border-t text-center text-sm font-bold text-gray-500">Halaman {currentPage} (Blok: {progressInBlock}/10)</div>
+              </div>
+              <div className="w-full lg:w-96 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col shrink-0">
+                <div className="p-4 border-b bg-gray-50 rounded-t-xl flex justify-between items-center"><div><h2 className="font-bold text-gray-800 leading-tight">{currentSession.student.name}</h2><p className="text-xs text-gray-500 mt-1">{currentSession.label}</p></div><div className="text-right"><div className="text-[10px] text-gray-400 font-bold">NILAI</div><div className="text-3xl font-black text-primary">{score.toFixed(1)}</div></div></div>
+                <div className="p-4 space-y-4">
+                   <div className="text-xs text-gray-400 mb-1">Penguji Aktif: {currentSession.examiners.join(', ')}</div>
+                   <ScoringButtons />
+                </div>
+                <div className="flex-1"></div>
+                <div className="p-4 border-t space-y-3"><NavigationButtons /><button onClick={() => { if(confirm("Batal?")) setViewMode('list'); }} className="w-full text-xs text-red-500 hover:text-red-700">Batalkan Ujian</button></div>
+              </div>
+            </div>
+        )}
       </div>
     );
   };
@@ -328,15 +372,16 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
           <div><label className="block text-sm font-medium mb-1">Kelas</label><select className="w-full border rounded-lg p-2.5 bg-gray-50" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}><option value="">Pilih...</option>{Array.from(new Set(students.map(s => s.class))).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
           <div><label className="block text-sm font-medium mb-1">Santri</label><select className="w-full border rounded-lg p-2.5 bg-gray-50" value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}><option value="">Pilih...</option>{students.filter(s => !selectedClass || s.class === selectedClass).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         </div>
-        <div className="bg-gray-100 p-1 rounded-lg flex"><button className={`flex-1 py-2 rounded-md text-sm font-medium ${examMode === 'halaman' ? 'bg-white shadow text-primary' : 'text-gray-500'}`} onClick={() => setExamMode('halaman')}>Halaman</button><button className={`flex-1 py-2 rounded-md text-sm font-medium ${examMode === 'surat' ? 'bg-white shadow text-primary' : 'text-gray-500'}`} onClick={() => setExamMode('surat')}>Surat</button></div>
+        <div className="bg-gray-100 p-1 rounded-lg flex"><button className={`flex-1 py-2 rounded-md text-sm font-medium ${examMode === 'halaman' ? 'bg-white shadow text-primary' : 'text-gray-500'}`} onClick={() => setExamMode('halaman')}>Halaman Bebas</button><button className={`flex-1 py-2 rounded-md text-sm font-medium ${examMode === 'surat' ? 'bg-white shadow text-primary' : 'text-gray-500'}`} onClick={() => setExamMode('surat')}>Surat</button></div>
         {examMode === 'halaman' ? (
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-sm font-medium">Halaman</label><input type="number" min="1" max="604" className="w-full border rounded-lg p-2.5" value={startPage} onChange={(e) => setStartPage(parseInt(e.target.value) || 1)} /></div>
-            <div><label className="text-sm font-medium">Paket</label><select className="w-full border rounded-lg p-2.5" value={packetSize} onChange={(e) => setPacketSize(parseInt(e.target.value))}><option value={10}>10 Hal</option><option value={20}>20 Hal</option></select></div>
+            <div><label className="text-sm font-medium">Halaman Awal</label><input type="number" min="1" max="604" className="w-full border rounded-lg p-2.5" value={startPage} onChange={(e) => setStartPage(parseInt(e.target.value) || 1)} /></div>
+            <div><label className="text-sm font-medium">Halaman Akhir</label><input type="number" min={startPage} max="604" className="w-full border rounded-lg p-2.5" value={endPage} onChange={(e) => setEndPage(parseInt(e.target.value) || 604)} /></div>
           </div>
         ) : (
           <div><label className="text-sm font-medium">Pilih Surat</label><select className="w-full border rounded-lg p-2.5 bg-gray-50" value={selectedSurah} onChange={(e) => setSelectedSurah(e.target.value)}>{QURAN_CHAPTERS.map(q => <option key={q[0]} value={q[0]}>{q[0]}. {q[1]}</option>)}</select></div>
         )}
+        <div className="bg-blue-50 p-4 rounded-lg text-xs text-blue-700 flex items-start gap-2 border border-blue-100"><Play size={16} className="shrink-0 mt-0.5" /> <span>Fitur <b>Kunci Nilai</b> akan muncul setiap santri menyelesaikan 10 halaman hafalan.</span></div>
         <button onClick={handleStartExam} className="w-full py-3 bg-primary text-white rounded-lg font-bold flex items-center justify-center gap-2 mt-4">MULAI UJIAN <Award size={20} /></button>
       </div>
     </div>
@@ -353,7 +398,6 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
     .sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const activeExamSessions = exams.filter(e => e.status === 'remedial');
-
   const distinctExamClasses = Array.from(new Set(students.map(s => s.class))).sort();
 
   return <div className="min-h-[500px]">{viewMode === 'list' && (
@@ -363,53 +407,26 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           <div className="relative flex-1 md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Cari nama santri..." 
-              value={historySearchTerm}
-              onChange={(e) => setHistorySearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-primary focus:border-primary outline-none"
-            />
+            <input type="text" placeholder="Cari santri..." value={historySearchTerm} onChange={(e) => setHistorySearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-primary outline-none" />
           </div>
           <div className="relative w-full md:w-40">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <select 
-              value={historyFilterClass}
-              onChange={(e) => setHistoryFilterClass(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-primary focus:border-primary outline-none bg-white"
-            >
-              <option value="">Semua Kelas</option>
-              {distinctExamClasses.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <select value={historyFilterClass} onChange={(e) => setHistoryFilterClass(e.target.value)} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-primary outline-none bg-white"><option value="">Kelas</option>{distinctExamClasses.map(c => <option key={c} value={c}>{c}</option>)}</select>
           </div>
-          {user.role === 'teacher' && <button onClick={() => setViewMode('setup')} className="bg-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-sm hover:bg-emerald-800 transition-colors"><Play size={18} /> Mulai Ujian</button>}
+          {user.role === 'teacher' && <button onClick={() => setViewMode('setup')} className="bg-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-sm hover:bg-emerald-800"><Play size={18} /> Ujian Baru</button>}
         </div>
       </div>
 
       {activeExamSessions.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-8">
-              <h3 className="text-amber-800 font-bold mb-4 flex items-center gap-2">
-                  <PauseCircle size={20} /> Ujian Berlangsung
-              </h3>
+              <h3 className="text-amber-800 font-bold mb-4 flex items-center gap-2"><PauseCircle size={20} /> Ujian Berlangsung / Tersimpan</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {activeExamSessions.map(sess => {
                       const s = students.find(st => st.id === sess.studentId);
                       return (
                           <div key={sess.id} className="bg-white p-4 rounded-lg border border-amber-100 shadow-sm flex flex-col justify-between">
-                              <div>
-                                  <div className="flex justify-between items-start">
-                                      <p className="font-bold text-gray-800">{s?.name}</p>
-                                      <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">SESI AKTIF</span>
-                                  </div>
-                                  <p className="text-xs text-gray-500 mt-1">{sess.category} | Nilai: {sess.score}</p>
-                                  <p className="text-[10px] text-gray-400 mt-2">Penguji: {sess.examiner}</p>
-                              </div>
-                              <button 
-                                onClick={() => handleResumeExam(sess)}
-                                className="mt-4 w-full bg-amber-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-amber-700 transition-colors flex items-center justify-center gap-2"
-                              >
-                                  <Play size={14} /> LANJUTKAN UJIAN
-                              </button>
+                              <div><div className="flex justify-between items-start"><p className="font-bold text-gray-800">{s?.name}</p><span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">SESI AKTIF</span></div><p className="text-xs text-gray-500 mt-1">{sess.category} | Nilai: {sess.score}</p><p className="text-[10px] text-gray-400 mt-2">Penguji: {sess.examiner}</p></div>
+                              <button onClick={() => handleResumeExam(sess)} className="mt-4 w-full bg-amber-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-amber-700 flex items-center justify-center gap-2"><Play size={14} /> LANJUTKAN UJIAN</button>
                           </div>
                       );
                   })}
@@ -418,30 +435,16 @@ const ExamView: React.FC<ExamViewProps> = ({ user, students, exams, onAddExam, o
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredExams.length === 0 ? <div className="col-span-full text-center py-12 text-gray-400">Belum ada data atau tidak ditemukan.</div> : filteredExams.map(exam => {
+        {filteredExams.length === 0 ? <div className="col-span-full text-center py-12 text-gray-400">Belum ada data.</div> : filteredExams.map(exam => {
             const s = students.find(st => st.id === exam.studentId);
-            const juzLabel = exam.juz || (exam.details?.juz) || 'Juz -';
-            const displayTitle = `${s?.class || '-'} | ${juzLabel}, ${exam.category}`;
-            
             return (
-              <div key={exam.id} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+              <div key={exam.id} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md">
                 <div className={`h-1.5 w-full ${exam.score >= 70 ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 <div className="p-5">
-                  <div className="flex justify-between items-start mb-2">
-                      <div>
-                          <h3 className="font-bold text-gray-800 text-lg">{s?.name || 'Santri'}</h3>
-                          <p className="text-sm font-medium text-primary mt-0.5">{displayTitle}</p>
-                      </div>
-                      <div className={`text-right font-black text-2xl ${exam.score >= 70 ? 'text-green-600' : 'text-red-600'}`}>{exam.score}</div>
-                  </div>
-                  <div className="text-xs text-gray-500 flex justify-between mt-4 border-t pt-3">
-                      <span>{new Date(exam.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                      <span className="max-w-[120px] truncate text-right">{exam.examiner}</span>
-                  </div>
+                  <div className="flex justify-between items-start mb-2"><div><h3 className="font-bold text-gray-800 text-lg">{s?.name || 'Santri'}</h3><p className="text-sm font-medium text-primary mt-0.5">{s?.class || '-'} | {exam.category}</p></div><div className={`text-right font-black text-2xl ${exam.score >= 70 ? 'text-green-600' : 'text-red-600'}`}>{exam.score}</div></div>
+                  <div className="text-xs text-gray-500 flex justify-between mt-4 border-t pt-3"><span>{new Date(exam.date).toLocaleDateString('id-ID')}</span><span className="max-w-[120px] truncate">{exam.examiner}</span></div>
                   {(user.role === 'admin' || user.role === 'teacher') && onDeleteExam && (
-                      <button onClick={() => onDeleteExam(exam.id)} className="w-full mt-3 pt-2 border-t border-dashed text-xs text-red-500 text-center flex items-center justify-center gap-1 hover:text-red-700 transition-colors">
-                          <Trash2 size={12}/> Hapus Data
-                      </button>
+                      <button onClick={() => onDeleteExam(exam.id)} className="w-full mt-3 pt-2 border-t border-dashed text-xs text-red-500 flex items-center justify-center gap-1 hover:text-red-700"><Trash2 size={12}/> Hapus</button>
                   )}
                 </div>
               </div>
