@@ -4,7 +4,7 @@ import { User, Student, TahfidzRecord, Attendance, Exam, Grade } from './types';
 // CONFIGURATION & TUTORIAL SETUP
 // ---------------------------------------------------------------------------
 // 1. SETUP DATABASE (GOOGLE SHEETS)
-export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzq3XE3FVIW8MKxQ2jfyUkgK9KVYQ6hYNRdfHSlq1yWnnbSX5lczJOCbg5ajT8dwVw7/exec"; 
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPU0-1zQBdk7bq28vUkyUfqqtQnOyE3N4eRD3VwetYH9pI1ncYlmMxCZ3_A9mzri09/exec"; 
 
 // ---------------------------------------------------------------------------
 // 2. SETUP LOGO (GOOGLE DRIVE DIRECT LINK)
